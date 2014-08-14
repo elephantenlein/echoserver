@@ -14,7 +14,8 @@
 //--------------------------------------------------
 KAbstractServer::KAbstractServer() :/*{{{*/
 	listeners(new vector<int>),
-	clients(new vector<int>)
+	tcp_clients(new vector<int>),
+	udp_clients(new vector<int>)
 {
 }
 /*}}}*/
@@ -23,13 +24,17 @@ KAbstractServer::~KAbstractServer()/*{{{*/
 {
 vector<int>::iterator iter;
 
-for(iter=clients->begin(); iter != clients->end(); iter++)
+for(iter=udp_clients->begin(); iter != udp_clients->end(); iter++)
+    close(*iter);
+
+for(iter=tcp_clients->begin(); iter != tcp_clients->end(); iter++)
     close(*iter);
 
 for(iter=listeners->begin(); iter != listeners->end(); iter++)
     close(*iter);
 
-delete clients;
+delete udp_clients;
+delete tcp_clients;
 delete listeners;
 }
 /*}}}*/
@@ -75,18 +80,44 @@ return true;
 }
 /*}}}*/
 //--------------------------------------------------
+bool KAbstractServer::add_udp_client(int s)/*{{{*/
+{
+vector<int>::iterator iter;
+for(iter=udp_clients->begin(); iter != udp_clients->end(); iter++)
+    {
+    if(s == (*iter))
+	{
+	s=-1;
+	break;
+	}
+    }
+
+if(s == -1)
+    return false;
+
+udp_clients->push_back(s);
+if(s > max_socket)
+    max_socket=s;
+
+return true;
+}
+/*}}}*/
+//--------------------------------------------------
 bool KAbstractServer::process()/*{{{*/
 {
 vector<int>::iterator iter;
 
-FD_ZERO(&sockets);
+FD_ZERO(&sockets);/*{{{*/
 for(iter=listeners->begin(); iter != listeners->end(); iter++)
     FD_SET((*iter), &sockets);
 
-for(iter=clients->begin(); iter != clients->end(); iter++)
+for(iter=tcp_clients->begin(); iter != tcp_clients->end(); iter++)
     FD_SET((*iter), &sockets);
 
-int who;
+for(iter=udp_clients->begin(); iter != udp_clients->end(); iter++)
+    FD_SET((*iter), &sockets);
+/*}}}*/
+int who;/*{{{*/
 
 to.tv_sec=0;
 to.tv_usec=500;
@@ -100,22 +131,33 @@ if(who < 0)
 
 if(who == 0)
     return true; // just go on, nothing happened
-
-// process clients first
+/*}}}*/
+// process udp clients first
 bool retval=true;
-for(iter=clients->begin(); iter != clients->end(); iter++)
+for(iter=udp_clients->begin(); iter != udp_clients->end(); iter++)
     {
     if(!FD_ISSET((*iter), &sockets))
 	continue;
-    if(!process_client(*iter))
-	{
-	remove_client(iter);
-	retval = clients->size() == 0 ? false : true;
-	break;
-	}
+
+    process_udp_client(*iter);
     }
 
-// process listeners second
+// process tcp clients next
+for(iter=tcp_clients->begin(); iter != tcp_clients->end(); iter++)
+    {
+    if(!FD_ISSET((*iter), &sockets))
+	continue;
+    if(!process_tcp_client(*iter))
+	{
+	remove_tcp_client(iter);
+	retval = tcp_clients->size() == 0 ? false : true;
+	break;
+	}
+    else
+	retval=true;
+    }
+
+// process listeners
 int c=-1;
 for(iter=listeners->begin(); iter != listeners->end(); iter++)
     {
@@ -125,7 +167,8 @@ for(iter=listeners->begin(); iter != listeners->end(); iter++)
     if( (c = accept((*iter), NULL, NULL)) < 0)
 	{
 	perror("echod accept");
-	return false;
+	retval=false;
+	break;
 	}
 
     add_client(c);
@@ -141,30 +184,27 @@ void KAbstractServer::add_client(int c)/*{{{*/
 if(c > max_socket)
     max_socket = c;
 
-clients->push_back(c);
+tcp_clients->push_back(c);
 }
 /*}}}*/
 //--------------------------------------------------
-void KAbstractServer::remove_client(vector<int>::iterator &c)/*{{{*/
+void KAbstractServer::remove_tcp_client(vector<int>::iterator &c)/*{{{*/
 {
 close(*c);
-clients->erase(c);
+tcp_clients->erase(c);
+}
+/*}}}*/
+//--------------------------------------------------
+void KAbstractServer::remove_udp_client(vector<int>::iterator &c)/*{{{*/
+{
+close(*c);
+udp_clients->erase(c);
 }
 /*}}}*/
 //--------------------------------------------------
 // KEchoServer
 //--------------------------------------------------
-KEchoServer::KEchoServer()/*{{{*/
-{
-}
-/*}}}*/
-//--------------------------------------------------
-KEchoServer::~KEchoServer()/*{{{*/
-{
-}
-/*}}}*/
-//--------------------------------------------------
-bool KEchoServer::process_client(int c)/*{{{*/
+bool KEchoServer::process_tcp_client(int c)/*{{{*/
 {
 char buff[BUFF_SIZE];
 int sz;
@@ -173,6 +213,24 @@ sz=recv(c, &buff, BUFF_SIZE, 0);
 if(sz > 0)
     {
     send(c, &buff, sz, 0);
+    return true;
+    }
+
+return false;
+}
+/*}}}*/
+//--------------------------------------------------
+bool KEchoServer::process_udp_client(int c)/*{{{*/
+{
+char buff[BUFF_SIZE];
+int sz;
+socklen_t sa_sz;
+struct sockaddr sa;
+
+sz=recvfrom(c, &buff, BUFF_SIZE, 0, &sa, &sa_sz);
+if(sz > 0)
+    {
+    sendto(c, &buff, sz, 0, &sa, sa_sz);
     return true;
     }
 

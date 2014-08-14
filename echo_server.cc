@@ -16,13 +16,13 @@
 //--------------------------------------------------
 int main()
 {
-register int s, c;
+int tcp_s, udp_s, c;
 int b;
 struct sockaddr_in sa;
 
 KAbstractServer *serv=new KEchoServer;
 
-if( (s = socket(PF_INET, SOCK_STREAM, 0)) < 0)/*{{{*/
+if( (tcp_s = socket(PF_INET, SOCK_STREAM, 0)) < 0)/*{{{*/
     {
     perror("socket");
     return 1;
@@ -36,10 +36,22 @@ sa.sin_port   = htons(10000);
 if(INADDR_ANY)
     sa.sin_addr.s_addr = htonl(INADDR_ANY);
 
-if(bind(s, (struct sockaddr *)&sa, sizeof(sa)) < 0)
+if(bind(tcp_s, (struct sockaddr *)&sa, sizeof(sa)) < 0)
     {
     perror("bind");
     return 2;
+    }
+/*}}}*/
+if( (udp_s = socket(PF_INET, SOCK_DGRAM, 0)) < 0)/*{{{*/
+    {
+    perror("socket");
+    return 3;
+    }
+
+if(bind(udp_s, (struct sockaddr *)&sa, sizeof(sa)) < 0)
+    {
+    perror("bind");
+    return 4;
     }
 /*}}}*/
 switch(fork())/*{{{*/
@@ -48,28 +60,36 @@ switch(fork())/*{{{*/
 	break;
 
     default:
-	close(s);
+	close(tcp_s);
+	close(udp_s);
 	delete serv;
 	return 0;
 	break;
 
     case -1:
 	perror("fork");
-	return 3;
+	return 5;
 	break;
     };
 /*}}}*/
-listen(s, BACKLOG);
-if(!serv->add_listening_socket(s))
+listen(tcp_s, BACKLOG);
+if(!serv->add_listening_socket(tcp_s))
     {
-    printf("echod: duplicate socket\n");
-    return 4;
+    printf("echod: duplicate tcp socket\n");
+    return 6;
+    }
+
+if(!serv->add_udp_client(udp_s))
+    {
+    printf("echod: duplicate udp socket\n");
+    return 7;
     }
 
 while(serv->process())
     { }
 
 printf("good-bye!\n");
+fflush(stdout);
 return 0;
 }
 
