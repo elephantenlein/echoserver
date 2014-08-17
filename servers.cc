@@ -1,16 +1,22 @@
 //--------------------------------------------------
 // server class
 //--------------------------------------------------
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/time.h>
 #include <sys/socket.h>
+#include <algorithm>
 
 #include "servers.h"
 
 //--------------------------------------------------
 #define BUFF_SIZE 50
+
+//--------------------------------------------------
+static int sum;
+static void add_up(const int &);
 
 // KAbstractSocket
 //--------------------------------------------------
@@ -28,7 +34,6 @@ KAbstractSocket::KAbstractSocket(const int &sock) :/*{{{*/
 //--------------------------------------------------
 KAbstractSocket::~KAbstractSocket()/*{{{*/
 {
-printf("~KAbstractSocket\n");
 }
 /*}}}*/
 //--------------------------------------------------
@@ -71,7 +76,6 @@ KTCPSocket::KTCPSocket(const int &sock) :/*{{{*/
 //--------------------------------------------------
 KTCPSocket::~KTCPSocket()/*{{{*/
 {
-printf("~KTCPSocket\n");
 }
 /*}}}*/
 //--------------------------------------------------
@@ -115,7 +119,6 @@ KUDPSocket::KUDPSocket(const int &sock) :/*{{{*/
 //--------------------------------------------------
 KUDPSocket::~KUDPSocket()/*{{{*/
 {
-printf("~KUDPSocket\n");
 }
 /*}}}*/
 //--------------------------------------------------
@@ -368,7 +371,6 @@ if(client->getDescriptor() > max_socket)
     max_socket = client->getDescriptor();
 
 clients->push_back(client);
-printf("add_client: %d\n", clients->size());
 }
 /*}}}*/
 //--------------------------------------------------
@@ -398,8 +400,6 @@ dummy = *iter;
 clients->erase(iter);
 close(c_desc);
 delete dummy;
-
-printf("remove_client: %d | %d\n", clients->size(), threshold);
 }
 /*}}}*/
 //--------------------------------------------------
@@ -421,6 +421,81 @@ if(sz != 0)
     client->write(buff, sz);
 
 return true;
+}
+/*}}}*/
+//--------------------------------------------------
+// KEchoSummingServer
+//--------------------------------------------------
+bool KEchoSummingServer::process_client(const KAbstractSocket *client)/*{{{*/
+{
+bool retval;
+char buff[BUFF_SIZE];
+int sz;
+
+sz=BUFF_SIZE;
+retval=client->read(buff, sz);
+
+if(!retval)
+    return false;
+
+if(sz == 0)
+    return true;
+
+// echo back
+client->write(buff, sz);
+
+// do the stuff
+char *nl, *cur;
+
+cur=buff;
+nl=find(buff, buff+sz, '\n');
+while(cur != nl)
+    {
+    if(isdigit(*cur))
+	numbers.push_back((*cur) - '0');
+    ++cur;
+    }
+
+if(numbers.size() == 0)
+    return true;
+
+int sum;
+vector<char>::iterator iter;
+
+sum=0;
+for(iter=numbers.begin(); iter != numbers.end(); iter++)
+    sum += (*iter);
+
+sort(numbers.begin(), numbers.end());
+printf("received:\nsum: %d\nmin: %d\nmax: %d\n",
+       sum,
+       numbers.front(),
+       numbers.back());
+
+vector<char>::reverse_iterator riter;
+for(riter=numbers.rbegin(); riter != numbers.rend(); riter++)
+    printf("%d ", *riter);
+printf("\n");
+fflush(stdout);
+
+numbers.clear();
+cur=++nl;
+while(*cur != buff[sz])
+    {
+    if(isdigit(*cur))
+	numbers.push_back((*cur) - '0');
+    ++cur;
+    }
+
+return true;
+}
+/*}}}*/
+//--------------------------------------------------
+// static functions
+//--------------------------------------------------
+static void add_up(const int &x)/*{{{*/
+{
+sum += x;
 }
 /*}}}*/
 //--------------------------------------------------

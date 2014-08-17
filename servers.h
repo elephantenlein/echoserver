@@ -104,5 +104,16 @@ protected:
     bool process_client(const KAbstractSocket *);
 };
 
+//--------------------------------------------------
+class KEchoSummingServer : public KAbstractServer
+{
+protected:
+    bool process_client(const KAbstractSocket *);
+
+private:
+    vector<char> numbers;
+
+};
+
 #endif
 //--------------------------------------------------

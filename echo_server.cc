@@ -75,7 +75,7 @@ switch(fork())/*{{{*/
 /*}}}*/
 listen(tcp_s, BACKLOG);
 
-serv = new KEchoServer;
+serv = new KEchoSummingServer;
 incoming = new KAbstractSocket(tcp_s);
 if(!serv->add_listening_socket(*incoming))
     {
