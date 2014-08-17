@@ -2,6 +2,7 @@
 // server class
 //--------------------------------------------------
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/time.h>
 #include <sys/socket.h>
@@ -11,63 +12,243 @@
 //--------------------------------------------------
 #define BUFF_SIZE 50
 
+// KAbstractSocket
 //--------------------------------------------------
-KAbstractServer::KAbstractServer() :/*{{{*/
-	listeners(new vector<int>),
-	tcp_clients(new vector<int>),
-	udp_clients(new vector<int>)
+KAbstractSocket::KAbstractSocket() :/*{{{*/
+	s(-1)
 {
 }
 /*}}}*/
 //--------------------------------------------------
-KAbstractServer::~KAbstractServer()/*{{{*/
+KAbstractSocket::KAbstractSocket(const int &sock) :/*{{{*/
+	s(sock)
 {
-vector<int>::iterator iter;
-
-for(iter=udp_clients->begin(); iter != udp_clients->end(); iter++)
-    close(*iter);
-
-for(iter=tcp_clients->begin(); iter != tcp_clients->end(); iter++)
-    close(*iter);
-
-for(iter=listeners->begin(); iter != listeners->end(); iter++)
-    close(*iter);
-
-delete udp_clients;
-delete tcp_clients;
-delete listeners;
 }
 /*}}}*/
 //--------------------------------------------------
-bool KAbstractServer::add_listening_socket(int s)/*{{{*/
+KAbstractSocket::~KAbstractSocket()/*{{{*/
 {
-vector<int>::iterator iter;
-for(iter=listeners->begin(); iter != listeners->end(); iter++)
+printf("~KAbstractSocket\n");
+}
+/*}}}*/
+//--------------------------------------------------
+bool KAbstractSocket::read(char *, int &) const/*{{{*/
+{
+return false;
+}
+/*}}}*/
+//--------------------------------------------------
+bool KAbstractSocket::write(const char *, int &) const/*{{{*/
+{
+return false;
+}
+/*}}}*/
+//--------------------------------------------------
+void KAbstractSocket::setDescriptor(const int &sock)/*{{{*/
+{
+s=sock;
+}
+/*}}}*/
+//--------------------------------------------------
+int KAbstractSocket::getDescriptor() const/*{{{*/
+{
+return s;
+}
+/*}}}*/
+//--------------------------------------------------
+// KTCPSocket
+//--------------------------------------------------
+KTCPSocket::KTCPSocket()/*{{{*/
+{
+}
+/*}}}*/
+//--------------------------------------------------
+KTCPSocket::KTCPSocket(const int &sock) :/*{{{*/
+	KAbstractSocket(sock)
+{
+}
+/*}}}*/
+//--------------------------------------------------
+KTCPSocket::~KTCPSocket()/*{{{*/
+{
+printf("~KTCPSocket\n");
+}
+/*}}}*/
+//--------------------------------------------------
+bool KTCPSocket::read(char *buff, int &sz) const/*{{{*/
+{
+int sock, size;
+if( (sock = getDescriptor()) < 0)
+    { return false; }
+
+size=recv(sock, buff, sz, 0);
+sz=size;
+return size == 0 ? false : true;
+}
+/*}}}*/
+//--------------------------------------------------
+bool KTCPSocket::write(const char *buff, int &sz) const/*{{{*/
+{
+int size, sock;
+if( (sock = getDescriptor()) < 0)
+    { return false; }
+
+size=send(sock, buff, sz, 0);
+sz=size;
+return true;
+}
+/*}}}*/
+//--------------------------------------------------
+// KUDPSocket
+//--------------------------------------------------
+KUDPSocket::KUDPSocket()/*{{{*/
+{
+}
+/*}}}*/
+//--------------------------------------------------
+KUDPSocket::KUDPSocket(const int &sock) :/*{{{*/
+	KAbstractSocket(sock),
+	peer_is_set(false)
+{
+}
+/*}}}*/
+//--------------------------------------------------
+KUDPSocket::~KUDPSocket()/*{{{*/
+{
+printf("~KUDPSocket\n");
+}
+/*}}}*/
+//--------------------------------------------------
+bool KUDPSocket::read(char *buff, int &sz) const/*{{{*/
+{
+int sock, size;
+socklen_t sa_size;
+struct sockaddr_in peer;
+
+if( (sock = getDescriptor()) < 0)
+    { return false; }
+
+memset(buff, 0, sz);
+memset(&peer, 0, sizeof(peer));
+sa_size=sizeof(peer);
+size=recvfrom(sock, buff, sz, 0, (struct sockaddr *)&peer, &sa_size);
+
+if(size < 0)
     {
-    if(s == (*iter))
-	{
-	s=-1;
-	break;
-	}
+    perror("KUDPSocket::read");
+    return false;
     }
 
-if(s == -1)
-    return false;
-
-listeners->push_back(s);
-if(s > max_socket)
-    max_socket=s;
+sz=size;
+if(sa_size >= 0)
+    {
+    peer_is_set=true;
+    sa=peer;
+    }
+else
+    {
+    peer_is_set=false;
+    memset(&sa, 0, sizeof(struct sockaddr_in));
+    }
 
 return true;
 }
 /*}}}*/
 //--------------------------------------------------
-bool KAbstractServer::remove_listening_socket(const int &s)/*{{{*/
+bool KUDPSocket::write(const char *buff, int &sz) const/*{{{*/
 {
-vector<int>::iterator iter;
+int size, sock, sa_size;
+if( (sock = getDescriptor()) < 0)
+    { return false; }
+
+if(!peer_is_set)
+    return false;
+
+sa_size=sizeof(struct sockaddr_in);
+size=sendto(sock, buff, sz, 0, (struct sockaddr *)&sa, sa_size);
+
+sz=size;
+return true;
+}
+/*}}}*/
+//--------------------------------------------------
+void KUDPSocket::setPeer(const struct sockaddr_in &peer)/*{{{*/
+{
+sa=peer;
+peer_is_set=true;
+}
+/*}}}*/
+//--------------------------------------------------
+// KAbstractServer
+//--------------------------------------------------
+KAbstractServer::KAbstractServer() :/*{{{*/
+	max_socket(2),
+	threshold(0),
+	listeners(new vector<KAbstractSocket>),
+	clients(new deque<KAbstractSocket *>)
+{
+FD_ZERO(&sockets);
+to.tv_sec=0;
+to.tv_usec=0;
+}
+/*}}}*/
+//--------------------------------------------------
+KAbstractServer::~KAbstractServer()/*{{{*/
+{
+vector<KAbstractSocket>::iterator iter;
+deque<KAbstractSocket *>::iterator iter2;
+
+for(iter=listeners->begin(); iter != listeners->end(); iter++)
+    close((*iter).getDescriptor());
+
+for(iter2=clients->begin(); iter2 != clients->end(); iter2++)
+    {
+    close((*iter2)->getDescriptor());
+    delete (*iter2);
+    }
+
+delete listeners;
+delete clients;
+}
+/*}}}*/
+//--------------------------------------------------
+bool KAbstractServer::add_listening_socket(const KAbstractSocket &s)/*{{{*/
+{
+bool duplicate;
+int s_desc;
+vector<KAbstractSocket>::iterator iter;
+
+duplicate=false;
+s_desc=s.getDescriptor();
 for(iter=listeners->begin(); iter != listeners->end(); iter++)
     {
-    if(s == (*iter))
+    if(s_desc == (*iter).getDescriptor())
+	{
+	duplicate=true;
+	break;
+	}
+    }
+
+if(duplicate)
+    return false;
+
+listeners->push_back(s);
+if(s_desc > max_socket)
+    max_socket=s_desc;
+
+return true;
+}
+/*}}}*/
+//--------------------------------------------------
+bool KAbstractServer::remove_listening_socket(const KAbstractSocket &s)/*{{{*/
+{
+int s_desc;
+vector<KAbstractSocket>::iterator iter;
+
+s_desc=s.getDescriptor();
+for(iter=listeners->begin(); iter != listeners->end(); iter++)
+    {
+    if(s_desc == (*iter).getDescriptor())
 	break;
     }
 
@@ -75,29 +256,36 @@ if(iter == listeners->end())
     return false;
 
 listeners->erase(iter);
-close(s);
+close(s_desc);
 return true;
 }
 /*}}}*/
 //--------------------------------------------------
-bool KAbstractServer::add_udp_client(int s)/*{{{*/
+bool KAbstractServer::add_udp_client(KUDPSocket *s)/*{{{*/
 {
-vector<int>::iterator iter;
-for(iter=udp_clients->begin(); iter != udp_clients->end(); iter++)
+bool duplicate;
+int s_desc;
+deque<KAbstractSocket *>::iterator iter;
+
+duplicate=false;
+s_desc=s->getDescriptor();
+for(iter=clients->begin(); iter != clients->end(); iter++)
     {
-    if(s == (*iter))
+    if(s_desc == (*iter)->getDescriptor())
 	{
-	s=-1;
+	duplicate=true;
 	break;
 	}
     }
 
-if(s == -1)
+if(duplicate)
     return false;
 
-udp_clients->push_back(s);
-if(s > max_socket)
-    max_socket=s;
+clients->push_front(s);
+threshold++;
+
+if(s_desc > max_socket)
+    max_socket=s_desc;
 
 return true;
 }
@@ -105,17 +293,15 @@ return true;
 //--------------------------------------------------
 bool KAbstractServer::process()/*{{{*/
 {
-vector<int>::iterator iter;
+vector<KAbstractSocket>::iterator iter;
+deque<KAbstractSocket *>::iterator iter2;
 
 FD_ZERO(&sockets);/*{{{*/
 for(iter=listeners->begin(); iter != listeners->end(); iter++)
-    FD_SET((*iter), &sockets);
+    FD_SET((*iter).getDescriptor(), &sockets);
 
-for(iter=tcp_clients->begin(); iter != tcp_clients->end(); iter++)
-    FD_SET((*iter), &sockets);
-
-for(iter=udp_clients->begin(); iter != udp_clients->end(); iter++)
-    FD_SET((*iter), &sockets);
+for(iter2=clients->begin(); iter2 != clients->end(); iter2++)
+    FD_SET((*iter2)->getDescriptor(), &sockets);
 /*}}}*/
 int who;/*{{{*/
 
@@ -132,25 +318,17 @@ if(who < 0)
 if(who == 0)
     return true; // just go on, nothing happened
 /*}}}*/
-// process udp clients first
+// process clients first
 bool retval=true;
-for(iter=udp_clients->begin(); iter != udp_clients->end(); iter++)
+for(iter2=clients->begin(); iter2 != clients->end(); iter2++)
     {
-    if(!FD_ISSET((*iter), &sockets))
+    if(!FD_ISSET((*iter2)->getDescriptor(), &sockets))
 	continue;
 
-    process_udp_client(*iter);
-    }
-
-// process tcp clients next
-for(iter=tcp_clients->begin(); iter != tcp_clients->end(); iter++)
-    {
-    if(!FD_ISSET((*iter), &sockets))
-	continue;
-    if(!process_tcp_client(*iter))
+    if(!process_client(*iter2))
 	{
-	remove_tcp_client(iter);
-	retval = tcp_clients->size() == 0 ? false : true;
+	remove_client(*iter2);
+	retval = clients->size() == threshold ? false : true;
 	break;
 	}
     else
@@ -159,19 +337,24 @@ for(iter=tcp_clients->begin(); iter != tcp_clients->end(); iter++)
 
 // process listeners
 int c=-1;
+int l_desc;
+KAbstractSocket *tmp;
+
 for(iter=listeners->begin(); iter != listeners->end(); iter++)
     {
-    if(!FD_ISSET((*iter), &sockets))
+    l_desc=(*iter).getDescriptor();
+    if(!FD_ISSET(l_desc, &sockets))
 	continue;
 
-    if( (c = accept((*iter), NULL, NULL)) < 0)
+    if( (c = accept(l_desc, NULL, NULL)) < 0)
 	{
 	perror("echod accept");
 	retval=false;
 	break;
 	}
 
-    add_client(c);
+    tmp = new KTCPSocket(c);
+    add_client(tmp);
     retval=true;
     }
 
@@ -179,62 +362,65 @@ return retval;
 }
 /*}}}*/
 //--------------------------------------------------
-void KAbstractServer::add_client(int c)/*{{{*/
+void KAbstractServer::add_client(KAbstractSocket *client)/*{{{*/
 {
-if(c > max_socket)
-    max_socket = c;
+if(client->getDescriptor() > max_socket)
+    max_socket = client->getDescriptor();
 
-tcp_clients->push_back(c);
+clients->push_back(client);
+printf("add_client: %d\n", clients->size());
 }
 /*}}}*/
 //--------------------------------------------------
-void KAbstractServer::remove_tcp_client(vector<int>::iterator &c)/*{{{*/
+void KAbstractServer::remove_client(KAbstractSocket *client)/*{{{*/
 {
-close(*c);
-tcp_clients->erase(c);
-}
-/*}}}*/
-//--------------------------------------------------
-void KAbstractServer::remove_udp_client(vector<int>::iterator &c)/*{{{*/
-{
-close(*c);
-udp_clients->erase(c);
+int th;
+int c_desc;
+KAbstractSocket *dummy;
+deque<KAbstractSocket *>::iterator iter;
+
+c_desc=client->getDescriptor();
+for(th=0, iter=clients->begin(); iter != clients->end(); iter++, th++)
+    {
+    if((*iter)->getDescriptor() == c_desc)
+	break;
+    }
+
+if(iter == clients->end())
+    return;
+
+if(th < threshold)
+    threshold--;
+
+threshold = threshold < 0 ? 0 : threshold;
+
+dummy = *iter;
+clients->erase(iter);
+close(c_desc);
+delete dummy;
+
+printf("remove_client: %d | %d\n", clients->size(), threshold);
 }
 /*}}}*/
 //--------------------------------------------------
 // KEchoServer
 //--------------------------------------------------
-bool KEchoServer::process_tcp_client(int c)/*{{{*/
+bool KEchoServer::process_client(const KAbstractSocket *client)/*{{{*/
 {
+bool retval;
 char buff[BUFF_SIZE];
 int sz;
 
-sz=recv(c, &buff, BUFF_SIZE, 0);
-if(sz > 0)
-    {
-    send(c, &buff, sz, 0);
-    return true;
-    }
+sz=BUFF_SIZE;
+retval=client->read(buff, sz);
 
-return false;
-}
-/*}}}*/
-//--------------------------------------------------
-bool KEchoServer::process_udp_client(int c)/*{{{*/
-{
-char buff[BUFF_SIZE];
-int sz;
-socklen_t sa_sz;
-struct sockaddr sa;
+if(!retval)
+    return false;
 
-sz=recvfrom(c, &buff, BUFF_SIZE, 0, &sa, &sa_sz);
-if(sz > 0)
-    {
-    sendto(c, &buff, sz, 0, &sa, sa_sz);
-    return true;
-    }
+if(sz != 0)
+    client->write(buff, sz);
 
-return false;
+return true;
 }
 /*}}}*/
 //--------------------------------------------------

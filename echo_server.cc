@@ -20,7 +20,9 @@ int tcp_s, udp_s, c;
 int b;
 struct sockaddr_in sa;
 
-KAbstractServer *serv=new KEchoServer;
+KAbstractSocket *incoming;
+KUDPSocket *udp;
+KAbstractServer *serv;
 
 if( (tcp_s = socket(PF_INET, SOCK_STREAM, 0)) < 0)/*{{{*/
     {
@@ -62,7 +64,6 @@ switch(fork())/*{{{*/
     default:
 	close(tcp_s);
 	close(udp_s);
-	delete serv;
 	return 0;
 	break;
 
@@ -73,13 +74,17 @@ switch(fork())/*{{{*/
     };
 /*}}}*/
 listen(tcp_s, BACKLOG);
-if(!serv->add_listening_socket(tcp_s))
+
+serv = new KEchoServer;
+incoming = new KAbstractSocket(tcp_s);
+if(!serv->add_listening_socket(*incoming))
     {
     printf("echod: duplicate tcp socket\n");
     return 6;
     }
 
-if(!serv->add_udp_client(udp_s))
+udp = new KUDPSocket(udp_s);
+if(!serv->add_udp_client(udp))
     {
     printf("echod: duplicate udp socket\n");
     return 7;
@@ -88,6 +93,7 @@ if(!serv->add_udp_client(udp_s))
 while(serv->process())
     { }
 
+delete serv;
 printf("good-bye!\n");
 fflush(stdout);
 return 0;

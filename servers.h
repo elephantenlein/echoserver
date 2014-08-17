@@ -6,50 +6,102 @@
 
 //--------------------------------------------------
 #include <vector>
+#include <deque>
 
 #include <stdbool.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 
 //--------------------------------------------------
 using namespace::std;
 
 //--------------------------------------------------
-class KAbstractServer
+class KAbstractSocket/*{{{*/
+{
+
+public:
+    KAbstractSocket();
+    KAbstractSocket(const int &);
+    virtual ~KAbstractSocket();
+
+    virtual bool read(char *, int &) const;
+    virtual bool write(const char *, int &) const;
+
+    void setDescriptor(const int &);
+    int  getDescriptor() const;
+
+private:
+    int s;
+
+};
+/*}}}*/
+//--------------------------------------------------
+class KTCPSocket : public KAbstractSocket
+{
+
+public:
+    KTCPSocket();
+    KTCPSocket(const int &);
+    ~KTCPSocket();
+
+    bool read(char *, int &) const;
+    bool write(const char *, int &) const;
+};
+
+//--------------------------------------------------
+class KUDPSocket : public KAbstractSocket
+{
+
+public:
+    KUDPSocket();
+    KUDPSocket(const int &);
+    ~KUDPSocket();
+
+    bool read(char *, int &) const;
+    bool write(const char *, int &) const;
+
+    void setPeer(const struct sockaddr_in &);
+
+private:
+    mutable bool peer_is_set;
+    mutable struct sockaddr_in sa;
+};
+
+//--------------------------------------------------
+class KAbstractServer/*{{{*/
 {
 
 public:
     KAbstractServer();
     virtual ~KAbstractServer();
 
-    bool add_listening_socket(int);
-    bool remove_listening_socket(const int &);
+    bool add_listening_socket(const KAbstractSocket &);
+    bool remove_listening_socket(const KAbstractSocket &);
 
-    bool add_udp_client(int);
+    bool add_udp_client(KUDPSocket *);
     bool process();
 
 protected:
-    virtual bool process_tcp_client(int) = 0;
-    virtual bool process_udp_client(int) = 0;
+    virtual bool process_client(const KAbstractSocket *) = 0;
 
-    void add_client(int);
-    void remove_tcp_client(vector<int>::iterator &);
-    void remove_udp_client(vector<int>::iterator &);
+    void add_client(KAbstractSocket *);
+    void remove_client(KAbstractSocket *);
 
 private:
     int    max_socket;
+    int    threshold; // udp .. upd | threshold | tcp .. tcp
     fd_set sockets;
     struct timeval to;
-    vector<int> *listeners;
-    vector<int> *tcp_clients;
-    vector<int> *udp_clients;
+    vector<KAbstractSocket> *listeners;
+    deque<KAbstractSocket *> *clients;
 
 };
-
+/*}}}*/
 //--------------------------------------------------
 class KEchoServer : public KAbstractServer
 {
 protected:
-    bool process_tcp_client(int);
-    bool process_udp_client(int);
+    bool process_client(const KAbstractSocket *);
 };
 
 #endif
