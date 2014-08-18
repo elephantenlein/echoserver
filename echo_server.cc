@@ -16,8 +16,7 @@
 //--------------------------------------------------
 int main()
 {
-int tcp_s, udp_s, c;
-int b;
+int tcp_s, udp_s;
 struct sockaddr_in sa;
 
 KAbstractSocket *incoming;

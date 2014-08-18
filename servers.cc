@@ -14,10 +14,6 @@
 //--------------------------------------------------
 #define BUFF_SIZE 50
 
-//--------------------------------------------------
-static int sum;
-static void add_up(const int &);
-
 // KAbstractSocket
 //--------------------------------------------------
 KAbstractSocket::KAbstractSocket() :/*{{{*/
@@ -185,6 +181,7 @@ peer_is_set=true;
 // KAbstractServer
 //--------------------------------------------------
 KAbstractServer::KAbstractServer() :/*{{{*/
+	done(false),
 	max_socket(2),
 	threshold(0),
 	listeners(new vector<KAbstractSocket>),
@@ -331,7 +328,8 @@ for(iter2=clients->begin(); iter2 != clients->end(); iter2++)
     if(!process_client(*iter2))
 	{
 	remove_client(*iter2);
-	retval = clients->size() == threshold ? false : true;
+	if(done)
+	    retval = clients->size() == (unsigned int)threshold ? false : true;
 	break;
 	}
     else
@@ -371,6 +369,7 @@ if(client->getDescriptor() > max_socket)
     max_socket = client->getDescriptor();
 
 clients->push_back(client);
+done=true;
 }
 /*}}}*/
 //--------------------------------------------------
@@ -488,14 +487,6 @@ while(*cur != buff[sz])
     }
 
 return true;
-}
-/*}}}*/
-//--------------------------------------------------
-// static functions
-//--------------------------------------------------
-static void add_up(const int &x)/*{{{*/
-{
-sum += x;
 }
 /*}}}*/
 //--------------------------------------------------

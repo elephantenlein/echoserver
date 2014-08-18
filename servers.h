@@ -88,8 +88,9 @@ protected:
     void remove_client(KAbstractSocket *);
 
 private:
+    bool   done;
     int    max_socket;
-    int    threshold; // udp .. upd | threshold | tcp .. tcp
+    int    threshold; // index of last udp client on the deque
     fd_set sockets;
     struct timeval to;
     vector<KAbstractSocket> *listeners;
